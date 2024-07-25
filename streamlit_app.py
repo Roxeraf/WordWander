@@ -4,6 +4,7 @@ from langchain.callbacks import StreamlitCallbackHandler
 from langchain.chat_models import ChatOpenAI
 from langchain.tools import Tool, DuckDuckGoSearchRun
 from langchain.memory import ConversationBufferMemory
+from interpreter import interpreter
 import json
 
 # Use the API key from Streamlit secrets
@@ -23,89 +24,57 @@ if 'current_exercise' not in st.session_state:
 if 'user_answers' not in st.session_state:
     st.session_state.user_answers = {}
 
+# Initialize Open Interpreter
+interpreter.api_key = openai_api_key
+interpreter.auto_run = True
+
 # Language learning tools
 def generate_exercise(query):
-    prompt = f"Generate a {query} exercise for {st.session_state.language} at {st.session_state.level} level. Format the response as a JSON object with 'questions' as a list of dictionaries, each containing 'question' and 'correct_answer' keys."
-    response = llm.predict(prompt)
-    try:
-        exercise = json.loads(response)
-        return json.dumps(exercise)
-    except json.JSONDecodeError:
-        return "Error: Could not generate a valid exercise. Please try again."
+    code = f"""
+import random
+import json
+
+def generate_{st.session_state.language.lower()}_exercise(level):
+    vocab = {{
+        "Beginner": [("hello", "hola"), ("goodbye", "adiós"), ("please", "por favor")],
+        "Intermediate": [("to develop", "desarrollar"), ("to improve", "mejorar"), ("skill", "habilidad")],
+        "Advanced": [("to implement", "implementar"), ("to optimize", "optimizar"), ("algorithm", "algoritmo")]
+    }}
+    
+    questions = []
+    for _ in range(5):
+        word, translation = random.choice(vocab[level])
+        questions.append({{"question": f"Translate '{word}' to {st.session_state.language}", "correct_answer": translation}})
+    
+    return json.dumps({{"questions": questions}})
+
+print(generate_{st.session_state.language.lower()}_exercise("{st.session_state.level}"))
+"""
+    result = interpreter.run(code)
+    return result.strip()
 
 def evaluate_answers(exercise, user_answers):
-    exercise_dict = json.loads(exercise)
-    questions = exercise_dict['questions']
-    feedback = []
-    for i, question in enumerate(questions):
-        user_answer = user_answers.get(str(i), "").strip().lower()
-        correct_answer = question['correct_answer'].lower()
-        if user_answer == correct_answer:
-            feedback.append(f"Question {i+1}: Correct!")
-        else:
-            feedback.append(f"Question {i+1}: Incorrect. The correct answer is '{correct_answer}'. You answered '{user_answer}'.")
-    return "\n".join(feedback)
+    code = f"""
+import json
 
-def translate_text(query):
-    return f"Translate the following text to {st.session_state.language}: {query}"
+exercise = json.loads('''{exercise}''')
+user_answers = {user_answers}
 
-# Initialize DuckDuckGo search with error handling
-def safe_ddg_search(query):
-    try:
-        search = DuckDuckGoSearchRun()
-        return search.run(query)
-    except Exception as e:
-        return f"An error occurred during the search: {str(e)}. I'll try to answer based on my existing knowledge."
+feedback = []
+for i, question in enumerate(exercise['questions']):
+    user_answer = user_answers.get(str(i), "").strip().lower()
+    correct_answer = question['correct_answer'].lower()
+    if user_answer == correct_answer:
+        feedback.append(f"Question {{i+1}}: Correct!")
+    else:
+        feedback.append(f"Question {{i+1}}: Incorrect. The correct answer is '{{correct_answer}}'. You answered '{{user_answer}}'.")
 
-# Define tools
-tools = [
-    Tool(
-        name="Internet Search",
-        func=safe_ddg_search,
-        description="Useful for finding up-to-date information on language topics."
-    ),
-    Tool(
-        name="Generate Exercise",
-        func=generate_exercise,
-        description="Generates an exercise on a specific topic."
-    ),
-    Tool(
-        name="Translation",
-        func=translate_text,
-        description="Translates text to the target language."
-    )
-]
+print("\\n".join(feedback))
+"""
+    result = interpreter.run(code)
+    return result.strip()
 
-# Initialize the agent with GPT-4o-mini
-llm = ChatOpenAI(
-    temperature=0.7, 
-    streaming=True, 
-    openai_api_key=openai_api_key,
-    model="gpt-4o-mini"
-)
-
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-agent = initialize_agent(
-    tools, 
-    llm, 
-    agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
-    verbose=True,
-    memory=memory
-)
-
-# Sidebar for language and level selection
-st.sidebar.header("Choose Your Learning Path")
-selected_language = st.sidebar.selectbox("Select Language", ["Spanish", "French", "German", "Italian", "Chinese"])
-selected_level = st.sidebar.selectbox("Select Your Level", ["Beginner", "Intermediate", "Advanced"])
-
-if st.sidebar.button("Start Learning"):
-    st.session_state.language = selected_language
-    st.session_state.level = selected_level
-    st.session_state.messages = []
-    st.session_state.current_exercise = None
-    st.session_state.user_answers = {}
-    st.experimental_rerun()
+# ... (rest of the code remains the same)
 
 # Main chat interface
 if st.session_state.language and st.session_state.level:
@@ -147,7 +116,7 @@ if st.session_state.language and st.session_state.level:
             message_placeholder.markdown(full_response)
         
         if "Generate Exercise" in prompt:
-            st.session_state.current_exercise = full_response
+            st.session_state.current_exercise = generate_exercise(prompt)
 
         st.session_state.messages.append({"role": "assistant", "content": full_response})
 

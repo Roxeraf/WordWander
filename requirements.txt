@@ -1,4 +1,5 @@
 streamlit==1.24.0
 langchain==0.0.228
-openai==0.27.8
+openai
 duckduckgo-search==3.8.3
+open-interpreter==0.1.5

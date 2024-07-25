@@ -4,6 +4,7 @@ from langchain.callbacks import StreamlitCallbackHandler
 from langchain.chat_models import ChatOpenAI
 from langchain.tools import Tool, DuckDuckGoSearchRun
 from langchain.memory import ConversationBufferMemory
+import json
 
 # Use the API key from Streamlit secrets
 openai_api_key = st.secrets["OPENAI_API_KEY"]
@@ -17,10 +18,33 @@ if 'level' not in st.session_state:
     st.session_state.level = None
 if 'messages' not in st.session_state:
     st.session_state.messages = []
+if 'current_exercise' not in st.session_state:
+    st.session_state.current_exercise = None
+if 'user_answers' not in st.session_state:
+    st.session_state.user_answers = {}
 
 # Language learning tools
-def generate_lesson(query):
-    return f"Generate a lesson about '{query}' for {st.session_state.language} at {st.session_state.level} level."
+def generate_exercise(query):
+    prompt = f"Generate a {query} exercise for {st.session_state.language} at {st.session_state.level} level. Format the response as a JSON object with 'questions' as a list of dictionaries, each containing 'question' and 'correct_answer' keys."
+    response = llm.predict(prompt)
+    try:
+        exercise = json.loads(response)
+        return json.dumps(exercise)
+    except json.JSONDecodeError:
+        return "Error: Could not generate a valid exercise. Please try again."
+
+def evaluate_answers(exercise, user_answers):
+    exercise_dict = json.loads(exercise)
+    questions = exercise_dict['questions']
+    feedback = []
+    for i, question in enumerate(questions):
+        user_answer = user_answers.get(str(i), "").strip().lower()
+        correct_answer = question['correct_answer'].lower()
+        if user_answer == correct_answer:
+            feedback.append(f"Question {i+1}: Correct!")
+        else:
+            feedback.append(f"Question {i+1}: Incorrect. The correct answer is '{correct_answer}'. You answered '{user_answer}'.")
+    return "\n".join(feedback)
 
 def translate_text(query):
     return f"Translate the following text to {st.session_state.language}: {query}"
@@ -41,9 +65,9 @@ tools = [
         description="Useful for finding up-to-date information on language topics."
     ),
     Tool(
-        name="Generate Lesson",
-        func=generate_lesson,
-        description="Generates a lesson on a specific topic."
+        name="Generate Exercise",
+        func=generate_exercise,
+        description="Generates an exercise on a specific topic."
     ),
     Tool(
         name="Translation",
@@ -79,6 +103,8 @@ if st.sidebar.button("Start Learning"):
     st.session_state.language = selected_language
     st.session_state.level = selected_level
     st.session_state.messages = []
+    st.session_state.current_exercise = None
+    st.session_state.user_answers = {}
     st.experimental_rerun()
 
 # Main chat interface
@@ -90,6 +116,21 @@ if st.session_state.language and st.session_state.level:
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
+    # Exercise interface
+    if st.session_state.current_exercise:
+        exercise = json.loads(st.session_state.current_exercise)
+        st.write("### Current Exercise")
+        for i, question in enumerate(exercise['questions']):
+            st.text(f"Question {i+1}: {question['question']}")
+            st.session_state.user_answers[str(i)] = st.text_input(f"Answer {i+1}", key=f"answer_{i}")
+        
+        if st.button("Submit Answers"):
+            feedback = evaluate_answers(st.session_state.current_exercise, st.session_state.user_answers)
+            st.session_state.messages.append({"role": "assistant", "content": feedback})
+            st.session_state.current_exercise = None
+            st.session_state.user_answers = {}
+            st.experimental_rerun()
 
     # Chat input
     if prompt := st.chat_input("What would you like to learn about?"):
@@ -104,6 +145,10 @@ if st.session_state.language and st.session_state.level:
                 full_response += response
                 message_placeholder.markdown(full_response + "▌")
             message_placeholder.markdown(full_response)
+        
+        if "Generate Exercise" in prompt:
+            st.session_state.current_exercise = full_response
+
         st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 else:

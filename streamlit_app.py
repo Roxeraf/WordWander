@@ -1,56 +1,99 @@
 import streamlit as st
-from openai import OpenAI
+from langchain.agents import initialize_agent, AgentType
+from langchain.callbacks import StreamlitCallbackHandler
+from langchain.chat_models import ChatOpenAI
+from langchain.tools import DuckDuckGoSearchRun
+from langchain.tools import Tool
+from langchain.prompts import PromptTemplate
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+# Use the API key from Streamlit secrets
+openai_api_key = st.secrets["OPENAI_API_KEY"]
+
+st.title("🌍 LangChain - Language Learning Assistant powered by GPT-4o-mini")
+
+# Language learning tools
+def generate_vocabulary_exercise(language, level):
+    prompt = f"Generate a vocabulary exercise for {language} at {level} level."
+    return prompt
+
+def generate_grammar_exercise(language, level):
+    prompt = f"Create a grammar exercise for {language} at {level} level."
+    return prompt
+
+def translate_text(text, target_language):
+    prompt = f"Translate the following text to {target_language}: {text}"
+    return prompt
+
+# Define tools
+search = DuckDuckGoSearchRun()
+tools = [
+    Tool(
+        name="Internet Search",
+        func=search.run,
+        description="Useful for finding up-to-date information on language topics."
+    ),
+    Tool(
+        name="Vocabulary Exercise",
+        func=generate_vocabulary_exercise,
+        description="Generates vocabulary exercises for language learning."
+    ),
+    Tool(
+        name="Grammar Exercise",
+        func=generate_grammar_exercise,
+        description="Creates grammar exercises for language practice."
+    ),
+    Tool(
+        name="Translation",
+        func=translate_text,
+        description="Translates text to the target language."
+    )
+]
+
+# Initialize the agent with GPT-4o-mini
+llm = ChatOpenAI(
+    temperature=0, 
+    streaming=True, 
+    openai_api_key=openai_api_key,
+    model="gpt-4o-mini"  # Using the GPT-4o-mini model as specified
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+agent = initialize_agent(
+    tools, 
+    llm, 
+    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, 
+    verbose=True
+)
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Create a text input for the user's language learning query
+user_query = st.text_input("What would you like to learn today? (e.g., 'Create a Spanish vocabulary exercise for beginners')")
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+if user_query:
+    st.write("I'm working on your request using GPT-4o-mini:")
+    with st.spinner("Thinking..."):
+        st_callback = StreamlitCallbackHandler(st.container())
+        response = agent.run(user_query, callbacks=[st_callback])
+    st.write(response)
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+# Language selection and level
+st.sidebar.subheader("Language Learning Settings")
+selected_language = st.sidebar.selectbox("Select Language", ["Spanish", "French", "German", "Italian", "Chinese"])
+proficiency_level = st.sidebar.selectbox("Select Proficiency Level", ["Beginner", "Intermediate", "Advanced"])
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# Quick actions
+st.sidebar.subheader("Quick Actions")
+if st.sidebar.button("Generate Vocabulary Exercise"):
+    with st.spinner("Generating exercise with GPT-4o-mini..."):
+        response = agent.run(f"Generate a vocabulary exercise for {selected_language} at {proficiency_level} level.")
+    st.write(response)
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+if st.sidebar.button("Generate Grammar Exercise"):
+    with st.spinner("Generating exercise with GPT-4o-mini..."):
+        response = agent.run(f"Create a grammar exercise for {selected_language} at {proficiency_level} level.")
+    st.write(response)
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# Translation feature
+text_to_translate = st.text_area("Enter text to translate:")
+if st.button("Translate") and text_to_translate:
+    with st.spinner("Translating with GPT-4o-mini..."):
+        response = agent.run(f"Translate the following text to {selected_language}: {text_to_translate}")
+    st.write(response)

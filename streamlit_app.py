@@ -2,9 +2,8 @@ import streamlit as st
 from langchain.agents import initialize_agent, AgentType
 from langchain.callbacks import StreamlitCallbackHandler
 from langchain.chat_models import ChatOpenAI
-from langchain.tools import DuckDuckGoSearchRun
-from langchain.tools import Tool
-from langchain.prompts import PromptTemplate
+from langchain.tools import Tool, DuckDuckGoSearchRun
+from langchain.utilities import DuckDuckGoSearchAPIWrapper
 
 # Use the API key from Streamlit secrets
 openai_api_key = st.secrets["OPENAI_API_KEY"]
@@ -12,24 +11,40 @@ openai_api_key = st.secrets["OPENAI_API_KEY"]
 st.title("🌍 LangChain - Language Learning Assistant powered by GPT-4o-mini")
 
 # Language learning tools
-def generate_vocabulary_exercise(language, level):
+def generate_vocabulary_exercise(query):
+    parts = query.split()
+    language = parts[-3]
+    level = parts[-1]
     prompt = f"Generate a vocabulary exercise for {language} at {level} level."
     return prompt
 
-def generate_grammar_exercise(language, level):
+def generate_grammar_exercise(query):
+    parts = query.split()
+    language = parts[-3]
+    level = parts[-1]
     prompt = f"Create a grammar exercise for {language} at {level} level."
     return prompt
 
-def translate_text(text, target_language):
+def translate_text(query):
+    parts = query.split(" to ")
+    text = parts[0].replace("Translate ", "")
+    target_language = parts[1]
     prompt = f"Translate the following text to {target_language}: {text}"
     return prompt
 
+# Initialize DuckDuckGo search with error handling
+def safe_ddg_search(query):
+    try:
+        search = DuckDuckGoSearchRun()
+        return search.run(query)
+    except Exception as e:
+        return f"An error occurred during the search: {str(e)}. I'll try to answer based on my existing knowledge."
+
 # Define tools
-search = DuckDuckGoSearchRun()
 tools = [
     Tool(
         name="Internet Search",
-        func=search.run,
+        func=safe_ddg_search,
         description="Useful for finding up-to-date information on language topics."
     ),
     Tool(
@@ -95,5 +110,5 @@ if st.sidebar.button("Generate Grammar Exercise"):
 text_to_translate = st.text_area("Enter text to translate:")
 if st.button("Translate") and text_to_translate:
     with st.spinner("Translating with GPT-4o-mini..."):
-        response = agent.run(f"Translate the following text to {selected_language}: {text_to_translate}")
+        response = agent.run(f"Translate {text_to_translate} to {selected_language}")
     st.write(response)

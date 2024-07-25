@@ -3,34 +3,27 @@ from langchain.agents import initialize_agent, AgentType
 from langchain.callbacks import StreamlitCallbackHandler
 from langchain.chat_models import ChatOpenAI
 from langchain.tools import Tool, DuckDuckGoSearchRun
-from langchain.utilities import DuckDuckGoSearchAPIWrapper
+from langchain.memory import ConversationBufferMemory
 
 # Use the API key from Streamlit secrets
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 
-st.title("🌍 LangChain - Language Learning Assistant powered by GPT-4o-mini")
+st.title("🌍 Interactive Language Learning with AI Teacher")
+
+# Initialize session state
+if 'language' not in st.session_state:
+    st.session_state.language = None
+if 'level' not in st.session_state:
+    st.session_state.level = None
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
 # Language learning tools
-def generate_vocabulary_exercise(query):
-    parts = query.split()
-    language = parts[-3]
-    level = parts[-1]
-    prompt = f"Generate a vocabulary exercise for {language} at {level} level."
-    return prompt
-
-def generate_grammar_exercise(query):
-    parts = query.split()
-    language = parts[-3]
-    level = parts[-1]
-    prompt = f"Create a grammar exercise for {language} at {level} level."
-    return prompt
+def generate_lesson(query):
+    return f"Generate a lesson about '{query}' for {st.session_state.language} at {st.session_state.level} level."
 
 def translate_text(query):
-    parts = query.split(" to ")
-    text = parts[0].replace("Translate ", "")
-    target_language = parts[1]
-    prompt = f"Translate the following text to {target_language}: {text}"
-    return prompt
+    return f"Translate the following text to {st.session_state.language}: {query}"
 
 # Initialize DuckDuckGo search with error handling
 def safe_ddg_search(query):
@@ -48,14 +41,9 @@ tools = [
         description="Useful for finding up-to-date information on language topics."
     ),
     Tool(
-        name="Vocabulary Exercise",
-        func=generate_vocabulary_exercise,
-        description="Generates vocabulary exercises for language learning."
-    ),
-    Tool(
-        name="Grammar Exercise",
-        func=generate_grammar_exercise,
-        description="Creates grammar exercises for language practice."
+        name="Generate Lesson",
+        func=generate_lesson,
+        description="Generates a lesson on a specific topic."
     ),
     Tool(
         name="Translation",
@@ -66,49 +54,57 @@ tools = [
 
 # Initialize the agent with GPT-4o-mini
 llm = ChatOpenAI(
-    temperature=0, 
+    temperature=0.7, 
     streaming=True, 
     openai_api_key=openai_api_key,
-    model="gpt-4o-mini"  # Using the GPT-4o-mini model as specified
+    model="gpt-4o-mini"
 )
+
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
 agent = initialize_agent(
     tools, 
     llm, 
-    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, 
-    verbose=True
+    agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
+    verbose=True,
+    memory=memory
 )
 
-# Create a text input for the user's language learning query
-user_query = st.text_input("What would you like to learn today? (e.g., 'Create a Spanish vocabulary exercise for beginners')")
-
-if user_query:
-    st.write("I'm working on your request using GPT-4o-mini:")
-    with st.spinner("Thinking..."):
-        st_callback = StreamlitCallbackHandler(st.container())
-        response = agent.run(user_query, callbacks=[st_callback])
-    st.write(response)
-
-# Language selection and level
-st.sidebar.subheader("Language Learning Settings")
+# Sidebar for language and level selection
+st.sidebar.header("Choose Your Learning Path")
 selected_language = st.sidebar.selectbox("Select Language", ["Spanish", "French", "German", "Italian", "Chinese"])
-proficiency_level = st.sidebar.selectbox("Select Proficiency Level", ["Beginner", "Intermediate", "Advanced"])
+selected_level = st.sidebar.selectbox("Select Your Level", ["Beginner", "Intermediate", "Advanced"])
 
-# Quick actions
-st.sidebar.subheader("Quick Actions")
-if st.sidebar.button("Generate Vocabulary Exercise"):
-    with st.spinner("Generating exercise with GPT-4o-mini..."):
-        response = agent.run(f"Generate a vocabulary exercise for {selected_language} at {proficiency_level} level.")
-    st.write(response)
+if st.sidebar.button("Start Learning"):
+    st.session_state.language = selected_language
+    st.session_state.level = selected_level
+    st.session_state.messages = []
+    st.experimental_rerun()
 
-if st.sidebar.button("Generate Grammar Exercise"):
-    with st.spinner("Generating exercise with GPT-4o-mini..."):
-        response = agent.run(f"Create a grammar exercise for {selected_language} at {proficiency_level} level.")
-    st.write(response)
+# Main chat interface
+if st.session_state.language and st.session_state.level:
+    st.write(f"You are learning {st.session_state.language} at {st.session_state.level} level.")
+    st.write("Chat with your AI language teacher below:")
 
-# Translation feature
-text_to_translate = st.text_area("Enter text to translate:")
-if st.button("Translate") and text_to_translate:
-    with st.spinner("Translating with GPT-4o-mini..."):
-        response = agent.run(f"Translate {text_to_translate} to {selected_language}")
-    st.write(response)
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Chat input
+    if prompt := st.chat_input("What would you like to learn about?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
+            for response in agent.run(prompt):
+                full_response += response
+                message_placeholder.markdown(full_response + "▌")
+            message_placeholder.markdown(full_response)
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+else:
+    st.write("Please select your language and level in the sidebar to start learning!")
